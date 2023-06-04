@@ -3,42 +3,35 @@
 #include <stdlib.h>
 #include <time.h>
 
-//#define DISABLE_NEON
+// #define DISABLE_NEON
 
 #if defined(__ARM_NEON) && !defined(DISABLE_NEON)
-    #define NEON_SUPPORT 1
+#define NEON_SUPPORT 1
 #else
-    #define NEON_SUPPORT 0
+#define NEON_SUPPORT 0
 #endif
 
 #if !defined(__ARM_64BIT_STATE) || !defined(__ARM_FEATURE_QRDMX)
-    #define QRDMX_SUPPORT 0
+#define QRDMX_SUPPORT 0
 #else
-    #define QRDMX_SUPPORT 1
+#define QRDMX_SUPPORT 1
 #endif
 
-
 #if NEON_SUPPORT
-    #include <arm_neon.h>
+#include <arm_neon.h>
 #endif
 
 #if !NEON_SUPPORT
 
-void matrix_vector_multiplication(
-        const int8_t *matrix, // column major
-        int32_t num_rows, 
-        int32_t num_columns,
-        const int16_t *input, 
-        int16_t *output
-        ) 
-{
+void matrix_vector_multiplication(const int8_t *matrix, // column major
+                                  int32_t num_rows, int32_t num_columns,
+                                  const int16_t *input, int16_t *output) {
   /* Computes the product of matrix by a vector using either
    * a 32 bit or 16 bit intermediary */
   int64_t i = 0;
-  for (int32_t i_x = 0, i_y = 0; i < (int64_t)num_rows * num_columns; ++i, ++i_y) 
-  {
-    if (i_y == num_rows) 
-    {
+  for (int32_t i_x = 0, i_y = 0; i < (int64_t)num_rows * num_columns;
+       ++i, ++i_y) {
+    if (i_y == num_rows) {
       i_y = 0;
       ++i_x;
     }
@@ -55,12 +48,10 @@ void matrix_vector_multiplication(
 
 #elif defined(HIGH_PRECISION)
 
-static inline void product(
-        const int8_t *matrix, // 8x1
-        int16_t v,            // 1x1
-        int32_t *result       // 8x1
-        ) 
-{
+static inline void product(const int8_t *matrix, // 8x1
+                           int16_t v,            // 1x1
+                           int32_t *result       // 8x1
+) {
   /* Computes the product using vmlal and a 32 bit intermediate result. */
   int32x4x2_t result32x4x2 = vld2q_s32(result);
   int16x8_t matrix_col16x8 = vmovl_s8(vld1_s8(matrix)); // load into 16 bits
@@ -73,12 +64,7 @@ static inline void product(
   vst2q_s32(result, result32x4x2);
 }
 
-static void squash(
-        int32_t *result, 
-        int16_t *output, 
-        int32_t num_rows
-        ) 
-{
+static void squash(int32_t *result, int16_t *output, int32_t num_rows) {
   /* Takes each element in result, applies a saturating rounding narrowing right
    * shift and stores the result in output */
   int32_t i_y = num_rows - 8;
@@ -97,14 +83,9 @@ static void squash(
   }
 }
 
-void matrix_vector_multiplication(
-        const int8_t *matrix, // column major
-        int32_t num_rows, 
-        int32_t num_columns,
-        const int16_t *input, 
-        int16_t *output
-        ) 
-{
+void matrix_vector_multiplication(const int8_t *matrix, // column major
+                                  int32_t num_rows, int32_t num_columns,
+                                  const int16_t *input, int16_t *output) {
   /* Computes the product of a matrix by a vector using a 32 bit intermediary.
    * More accurate, but requires more time and quite a bit of space */
   int32_t *result = (int32_t *)malloc(num_rows * 4);
@@ -124,12 +105,10 @@ void matrix_vector_multiplication(
 
 #elif !QRDMX_SUPPORT
 
-static inline void product(
-        const int8_t *matrix,  // 8x1
-        const int16_t *vector, // 1x1
-        int16_t *output        // 8x1
-        ) 
-{
+static inline void product(const int8_t *matrix,  // 8x1
+                           const int16_t *vector, // 1x1
+                           int16_t *output        // 8x1
+) {
   /* Computes the product of the first 8 elements of matrix by the first element
    * of vector and accumulates the result into output */
   int16x8_t result16x8 = vld1q_s16(output);
@@ -151,13 +130,12 @@ static inline void product(
   vst1q_s16(output, result16x8);
 }
 
-static inline void product_nrow(
-        const int8_t *matrix,  // pointer to first element in row
-        const int16_t *vector, // pointer to corresponding vector element
-        int16_t *output,       // pointer to first element in output
-        int8_t n               // number of rows to process, 0 < n <= min(8, num_rows)
-        ) 
-{
+static inline void
+product_nrow(const int8_t *matrix,  // pointer to first element in row
+             const int16_t *vector, // pointer to corresponding vector element
+             int16_t *output,       // pointer to first element in output
+             int8_t n // number of rows to process, 0 < n <= min(8, num_rows)
+) {
   /* Computes the product of the first n elements of matrix by the first element
    * of vector and accumulates the result into output */
   for (int i = 0; i < n; ++i) {
@@ -181,14 +159,9 @@ static inline void product_nrow(
   }
 }
 
-void matrix_vector_multiplication(
-        const int8_t *matrix, // column major
-        int32_t num_rows, 
-        int32_t num_columns,
-        const int16_t *input, 
-        int16_t *output
-        ) 
-{
+void matrix_vector_multiplication(const int8_t *matrix, // column major
+                                  int32_t num_rows, int32_t num_columns,
+                                  const int16_t *input, int16_t *output) {
   /* Computes the product of a matrix by a vector using a left shift, the
    * vqdmulhq_n_s16 intrinsic and a saturating add. */
   int64_t index = (int64_t)num_columns * num_rows - 8;
@@ -206,13 +179,8 @@ void matrix_vector_multiplication(
 
 #else // only available on armv8.1 (not rpi3)
 
-static inline void product(
-        const int8_t *matrix, 
-        int16x4_t vector16x4,
-        int16_t *output, 
-        int32_t num_rows
-        ) 
-{
+static inline void product(const int8_t *matrix, int16x4_t vector16x4,
+                           int16_t *output, int32_t num_rows) {
   /* Computes the product of the first 8 elements of 4 rows of the matrix by the
    * first 4 element of vector and accumulates the result into output using the
    * vqrdmlahq_laneq_s16 intrinsic. Not available on pi. */
@@ -240,14 +208,13 @@ static inline void product(
   vst1q_s16(output, result16x8);
 }
 
-static inline void product_nrow(
-        const int8_t *matrix,  // pointer to first element in first row
-        int16x4_t vector16x4,  // 4 elements from input vector
-        int16_t *output,       // pointer to first element in output
-        int32_t num_rows,
-        int8_t n               // number of rows to process, 0 < n <= min(8, num_rows)
-        ) 
-{
+static inline void
+product_nrow(const int8_t *matrix, // pointer to first element in first row
+             int16x4_t vector16x4, // 4 elements from input vector
+             int16_t *output,      // pointer to first element in output
+             int32_t num_rows,
+             int8_t n // number of rows to process, 0 < n <= min(8, num_rows)
+) {
   /* Computes the product of the first n elements of 4 rows of the matrix by the
    * first 4 element of vector and accumulates the result into output using the
    * vqrdmlahq_laneq_s16 intrinsic. Not available on pi. */
@@ -278,12 +245,11 @@ static inline void product_nrow(
 }
 
 static inline void product_nrow_1col(
-    const int8_t *matrix,  // pointer to first element in first row
-    int16_t v,             // the value to multiply by
-    int16_t *output,       // pointer to first element in output
-    int8_t n               // number of rows to process, 0 < n <= min(8, num_rows)
-    ) 
-{
+    const int8_t *matrix, // pointer to first element in first row
+    int16_t v,            // the value to multiply by
+    int16_t *output,      // pointer to first element in output
+    int8_t n // number of rows to process, 0 < n <= min(8, num_rows)
+) {
   /* Computes the product of the first n elements of 1 row of the matrix by the
    * first element of vector and accumulates the result into output using the
    * vqrdmlahq_laneq_s16 intrinsic. Not available on pi. */
@@ -300,18 +266,12 @@ static inline void product_nrow_1col(
   }
 }
 
-void matrix_vector_multiplication(
-        const int8_t *matrix, // column major
-        int32_t num_rows, 
-        int32_t num_columns,
-        const int16_t *vector, 
-        int16_t *output
-        ) 
-{
+void matrix_vector_multiplication(const int8_t *matrix, // column major
+                                  int32_t num_rows, int32_t num_columns,
+                                  const int16_t *vector, int16_t *output) {
   // set assocative cache is probably ok to access 4 indices (need to test)
   int32_t i_x = num_columns - 4;
-  for (int32_t i_y; i_x > -1; i_x -= 4) 
-  {
+  for (int32_t i_y; i_x > -1; i_x -= 4) {
     int16x4_t vector16x4 = vld1_s16(vector + i_x);
     int64_t i_base =
         ((int64_t)i_x + 1) * num_rows - 8; // eight last element in column i_x
@@ -327,8 +287,8 @@ void matrix_vector_multiplication(
 
   // first three or fewer columns
   i_x += 3; // i_x is last column not seen
-  for (int64_t index = ((int64_t)i_x + 1) * num_rows - 8; i_x > -1; --i_x, index -= 8) 
-  {
+  for (int64_t index = ((int64_t)i_x + 1) * num_rows - 8; i_x > -1;
+       --i_x, index -= 8) {
     int32_t i_y = num_rows - 1;
     for (; i_y > -1; i_y -= 8, index -= 8) { // could iterate 8 at a time too
       product_nrow_1col(matrix + index, vector[i_x], output + i_y, 8);
@@ -340,16 +300,12 @@ void matrix_vector_multiplication(
 
 #endif
 
-long int perf_test(
-        void (*matrix_vector_multiplication)(const int8_t *, int32_t, int32_t, const int16_t *, int16_t *),
-        const int8_t *matrix, 
-        int32_t num_rows, 
-        int32_t num_columns,
-        const int16_t *input,
-		clockid_t clk_id
-        ) 
-{
-	/* Use clock_gettime to measure either wall time or cpu time */
+long int
+perf_test(void (*matrix_vector_multiplication)(const int8_t *, int32_t, int32_t,
+                                               const int16_t *, int16_t *),
+          const int8_t *matrix, int32_t num_rows, int32_t num_columns,
+          const int16_t *input, clockid_t clk_id) {
+  /* Use clock_gettime to measure either wall time or cpu time */
   int16_t *output = (int16_t *)malloc(2 * num_rows);
 
   struct timespec start, end;
@@ -358,63 +314,44 @@ long int perf_test(
   clock_gettime(clk_id, &end);
 
   free(output);
-  return (end.tv_sec - start.tv_sec) * (long)1e9 + (end.tv_nsec - start.tv_nsec);
+  return (end.tv_sec - start.tv_sec) * (long)1e9 +
+         (end.tv_nsec - start.tv_nsec);
 }
 
-long int real_time(
-        void (*matrix_vector_multiplication)(const int8_t *, int32_t, int32_t, const int16_t *, int16_t *),
-        const int8_t *matrix, 
-        int32_t num_rows, 
-        int32_t num_columns,
-        const int16_t *input
-        ) 
-{
-	return perf_test(matrix_vector_multiplication,
-			 matrix,
-			 num_rows,
-			 num_columns,
-			 input,
-			 CLOCK_REALTIME);
+long int
+real_time(void (*matrix_vector_multiplication)(const int8_t *, int32_t, int32_t,
+                                               const int16_t *, int16_t *),
+          const int8_t *matrix, int32_t num_rows, int32_t num_columns,
+          const int16_t *input) {
+  return perf_test(matrix_vector_multiplication, matrix, num_rows, num_columns,
+                   input, CLOCK_REALTIME);
 }
 
-long int cpu_time(
-        void (*matrix_vector_multiplication)(const int8_t *, int32_t, int32_t, const int16_t *, int16_t *),
-        const int8_t *matrix, 
-        int32_t num_rows, 
-        int32_t num_columns,
-        const int16_t *input
-        ) 
-{
-	return perf_test(matrix_vector_multiplication,
-			 matrix,
-			 num_rows,
-			 num_columns,
-			 input,
-			 CLOCK_PROCESS_CPUTIME_ID);
+long int cpu_time(void (*matrix_vector_multiplication)(const int8_t *, int32_t,
+                                                       int32_t, const int16_t *,
+                                                       int16_t *),
+                  const int8_t *matrix, int32_t num_rows, int32_t num_columns,
+                  const int16_t *input) {
+  return perf_test(matrix_vector_multiplication, matrix, num_rows, num_columns,
+                   input, CLOCK_PROCESS_CPUTIME_ID);
 }
-
 
 // allocates on the heap and doesn't free!
-int8_t *matrix_gen(
-        int32_t num_rows, 
-		int32_t num_cols
-        ) 
-{
-	int8_t* matrix = (int8_t*)malloc(num_rows*num_cols);
-	for (int64_t i = 0; i < num_rows*num_cols; ++i) {
-        matrix[i] = random();
-    }
-	return matrix;
+int8_t *matrix_gen(int32_t num_rows, int32_t num_cols) {
+  int8_t *matrix = (int8_t *)malloc(num_rows * num_cols);
+  for (int64_t i = 0; i < num_rows * num_cols; ++i) {
+    matrix[i] = random();
+  }
+  return matrix;
 }
-
 
 // allocates on the heap and doesn't free!
 int16_t *vector_gen(int32_t num_rows) {
-	int16_t* vector = (int16_t*)malloc(2*num_rows);
-	for (int64_t i = 0; i < num_rows; ++i) {
-        vector[i] = random();
-    }
-	return vector;
+  int16_t *vector = (int16_t *)malloc(2 * num_rows);
+  for (int64_t i = 0; i < num_rows; ++i) {
+    vector[i] = random();
+  }
+  return vector;
 }
 
 #define UTF_CHECK "\xE2\x9C\x93\n"
@@ -426,18 +363,17 @@ void print_available_intrinsics() {
   printf("  QRDMX: %s\n", QRDMX_SUPPORT ? UTF_CHECK : UTF_X);
 }
 
-
-
 #ifndef ITERATIONS
-    #define ITERATIONS 100
+#define ITERATIONS 100
 #endif
 
 int main(int argc, char *argv[]) {
   print_available_intrinsics();
 
   if (argc <= 2) {
-      printf("Expected two integer inputs m and n, representing dimensions of m x n matrix\n");
-      exit(1);
+    printf("Expected two integer inputs m and n, representing dimensions of m "
+           "x n matrix\n");
+    exit(1);
   }
   int m = atoi(argv[1]), n = atoi(argv[2]);
 
@@ -446,14 +382,17 @@ int main(int argc, char *argv[]) {
 
   time_t cpu_ttime = 0;
   for (int i = 0; i < ITERATIONS; ++i) {
-	  cpu_ttime += cpu_time(matrix_vector_multiplication, big_matrix, m, n, big_vector);
+    cpu_ttime +=
+        cpu_time(matrix_vector_multiplication, big_matrix, m, n, big_vector);
   }
 
   time_t wall_ttime = 0;
   for (int i = 0; i < ITERATIONS; ++i) {
-	  wall_ttime += real_time(matrix_vector_multiplication, big_matrix, m, n, big_vector);
+    wall_ttime +=
+        real_time(matrix_vector_multiplication, big_matrix, m, n, big_vector);
   }
-  printf("CPU time: %ld | Wall time: %ld\n", cpu_ttime/ITERATIONS, wall_ttime/ITERATIONS);
+  printf("CPU time: %ld | Wall time: %ld\n", cpu_ttime / ITERATIONS,
+         wall_ttime / ITERATIONS);
 
   free(big_matrix);
   free(big_vector);
